@@ -1,0 +1,6 @@
+# Fast local image: layer manual-refresh patches onto published Guovin image.
+FROM guovern/iptv-api:latest
+COPY main.py /iptv-api/main.py
+COPY service/app.py /iptv-api/service/app.py
+COPY utils/constants.py /iptv-api/utils/constants.py
+COPY utils/update_trigger.py /iptv-api/utils/update_trigger.py
