@@ -21,6 +21,7 @@ import logging
 from utils.i18n import t
 from utils.rtmp_runtime import install_rtmp_runtime, rtmp_runtime_status
 from utils.run_state import read_run_state
+from utils import update_trigger
 from utils.sponsors import helodata_console_message
 from utils.version_check import log_new_version_if_available, start_version_log_monitor
 from werkzeug.utils import secure_filename
@@ -486,6 +487,33 @@ def runtime_identity():
         "version": version.get("version"),
         "build_revision": version.get("build_revision"),
     })
+
+
+
+@app.post("/api/update")
+@app.post("/api/refresh")
+def request_manual_update():
+    """Request an immediate source update via file-based IPC with the scheduler."""
+    if not config.open_update:
+        return jsonify({"ok": False, "message": "更新已禁用（open_update=False）"}), 400
+    state = read_run_state()
+    if state.get("status") == "running":
+        return jsonify({"ok": False, "message": "更新正在进行中"}), 409
+    try:
+        update_trigger.write_trigger()
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"写入触发文件失败: {e}"}), 500
+    return jsonify({"ok": True, "message": "已请求立即更新"}), 202
+
+
+@app.get("/api/update")
+@app.get("/api/update/status")
+def update_status():
+    """Return run_state plus whether a manual trigger file is pending."""
+    state = dict(read_run_state())
+    state["trigger_pending"] = update_trigger.is_trigger_pending()
+    state["ok"] = True
+    return jsonify(state)
 
 
 def _prompt_rtmp_install():

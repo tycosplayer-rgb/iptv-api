@@ -23,6 +23,7 @@ from utils.i18n import t
 from utils.requests.async_tools import check_ipv6_support_async
 from utils.reporting import Reporter
 from utils.run_state import write_run_state
+from utils import update_trigger
 from utils.sponsors import helodata_console_message
 from utils.speed import clear_cache
 from utils.tools import (
@@ -912,6 +913,33 @@ class UpdateSource:
         if self.stop_event:
             self.stop_event.set()
 
+    async def _wait_for_schedule_or_trigger(self, stop_event: asyncio.Event, wait_seconds: float,
+                                              poll_interval: float = 3.0) -> str:
+        """Wait until schedule timeout, stop_event, or manual update trigger.
+
+        Returns one of: "timeout", "stop", "trigger".
+        """
+        if wait_seconds is None or wait_seconds < 0:
+            wait_seconds = 0
+        deadline = time() + wait_seconds
+        # Consume a stale trigger left from before wait started? No — only act when
+        # file appears/exists during wait so POST during wait is honored.
+        while True:
+            if stop_event.is_set():
+                return "stop"
+            if update_trigger.is_trigger_pending():
+                update_trigger.consume_trigger()
+                return "trigger"
+            remaining = deadline - time()
+            if remaining <= 0:
+                return "timeout"
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=min(poll_interval, remaining))
+                if stop_event.is_set():
+                    return "stop"
+            except asyncio.TimeoutError:
+                continue
+
     async def scheduler(self, stop_event: asyncio.Event):
         self.stop_event = stop_event
         tz = pytz.timezone(config.time_zone)
@@ -920,7 +948,11 @@ class UpdateSource:
 
         try:
             self.now = datetime.datetime.now(tz)
-            if config.update_startup:
+            # Honor pending trigger from a previous POST before first wait.
+            if update_trigger.is_trigger_pending():
+                update_trigger.consume_trigger()
+                await self.main()
+            elif config.update_startup:
                 await self.main()
 
             while not stop_event.is_set():
@@ -943,13 +975,17 @@ class UpdateSource:
                         scheduled_at=next_time.isoformat(),
                     )
 
-                    try:
-                        await asyncio.wait_for(stop_event.wait(), timeout=wait_seconds)
-                        if stop_event.is_set():
-                            break
-                    except asyncio.TimeoutError:
-                        self.now = datetime.datetime.now(tz)
-                        await self.main()
+                    reason = await self._wait_for_schedule_or_trigger(stop_event, wait_seconds)
+                    if reason == "stop":
+                        break
+                    self.now = datetime.datetime.now(tz)
+                    if reason == "trigger":
+                        self.reporter.info(
+                            "schedule.manual_trigger",
+                            "检测到手动更新触发，立即执行更新",
+                            phase="schedule",
+                        )
+                    await self.main()
                 else:
                     next_time = self.now + datetime.timedelta(hours=config.update_interval)
                     self.reporter.info(
@@ -959,14 +995,22 @@ class UpdateSource:
                         scheduled_at=next_time.isoformat(),
                     )
 
-                    try:
-                        await asyncio.wait_for(stop_event.wait(), timeout=config.update_interval * 3600)
-                    except asyncio.TimeoutError:
-                        self.now = datetime.datetime.now(tz)
-                        await self.main()
+                    wait_seconds = config.update_interval * 3600
+                    reason = await self._wait_for_schedule_or_trigger(stop_event, wait_seconds)
+                    if reason == "stop":
+                        break
+                    self.now = datetime.datetime.now(tz)
+                    if reason == "trigger":
+                        self.reporter.info(
+                            "schedule.manual_trigger",
+                            "检测到手动更新触发，立即执行更新",
+                            phase="schedule",
+                        )
+                    await self.main()
 
         except asyncio.CancelledError:
             self.reporter.warning("schedule.cancelled", t("msg.schedule_cancelled"), phase="schedule")
+
 
 
 if __name__ == "__main__":

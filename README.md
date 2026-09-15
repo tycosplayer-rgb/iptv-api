@@ -73,6 +73,7 @@
     - [Docker](#docker)
 - [📚 文档中心](./docs/README.md)
 - [📖 详细教程](./docs/tutorial.md)
+- [🔁 手动刷新](#手动刷新)
 - [🗓️ 更新日志](./CHANGELOG.md)
 - [👀 关注](#关注)
 - [❤️ 捐赠](#捐赠)
@@ -381,6 +382,8 @@ docker run -d -p 80:8080 guovern/iptv-api
 | /log/speed-test | 所有参与测速接口的日志 |
 | /log/statistic  | 统计结果的日志     |
 | /log/unmatch    | 未匹配频道的日志    |
+| /api/update     | 手动触发立即更新（POST）/ 查询状态（GET）；别名 POST /api/refresh |
+| /api/update/status | 查询更新运行状态与触发文件是否待处理 |
 
 日志接口默认返回兼容的纯文本格式；添加 `?format=jsonl` 可获取结构化 JSON Lines。CLI 在交互式终端使用动态多任务进度，Docker、CI、重定向输出或设置 `IPTV_API_PLAIN_OUTPUT=1` 时自动使用稳定的逐行输出。
 
@@ -405,6 +408,26 @@ docker run -d -p 80:8080 guovern/iptv-api
 | /stat         | 推流状态统计接口     |
 
 [如何使用推流？](./docs/tutorial.md#推流使用教程)
+
+
+## 手动刷新
+
+本 Fork 增加基于文件 IPC 的手动更新触发（Flask 与 `main.py` 调度器为独立进程，不共享内存）：
+
+- `POST /api/update`（或 `POST /api/refresh`）：若 `open_update=False` 返回 400；若当前 `run_state.status=="running"` 返回 409；否则在持久化目录写入触发文件并返回 **202** `{ok:true, message:"已请求立即更新"}`。
+- `GET /api/update` 或 `GET /api/update/status`：返回 `run_state` JSON，并附加 `trigger_pending` 字段表示触发文件是否仍待处理。
+
+调度器在等待下次定时任务时轮询触发文件（约数秒一次）；检测到后消费该文件并立即执行一轮更新，然后重新计算下次定时。
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/update
+curl http://127.0.0.1:8080/api/update/status
+```
+
+> 本项目不内置任何非法直播源；请仅使用您有权访问的授权订阅。
+
 
 ## 更新日志
 
