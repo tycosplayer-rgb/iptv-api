@@ -104,7 +104,6 @@ async def get_channels_by_subscribe_urls(
     )
     request_timeout = config.request_timeout
     open_headers = config.open_headers
-    open_unmatch_category = config.open_unmatch_category
     open_auto_disable_source = config.open_auto_disable_source
     open_subscribe_epg = config.open_subscribe_epg
     disabled_urls = set()
@@ -232,8 +231,10 @@ async def get_channels_by_subscribe_urls(
                                 "reason": "name_not_in_catalog",
                             })
                             unmatched_logged += 1
-                        if not open_unmatch_category:
-                            continue
+                        # Always keep unmatched subscribe channels in the
+                        # result set. open_unmatch_category used to drop them
+                        # here, which made template misses disappear from the
+                        # final playlist even when users expected retention.
                     value = _build_channel_item(item, headers, in_whitelist)
                     key = _channel_item_key(value)
                     if key not in channel_seen[name]:
