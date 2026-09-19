@@ -282,27 +282,27 @@ def get_channel_data_from_file(channels, file, whitelist_maps, blacklist,
                             category_dict[name].append(formatted)
                             existing_urls.add(formatted["url"])
 
-    if config.open_unmatch_category:
-        if open_local and local_data:
-            for local_name, local_urls in local_data.items():
-                if local_name in matched_local_names:
-                    continue
-                unmatch_local_urls = [
-                    format_channel_data(local_url, "whitelist" if is_url_whitelisted(whitelist_maps, local_url,
-                                                                                     local_name) else "local")
-                    for local_url in local_urls
-                    if not check_url_by_keywords(local_url, blacklist)
-                ]
-                if unmatch_local_urls:
-                    append_unmatch_data(local_name, unmatch_local_urls)
+    # Always retain local/HLS names that miss the template so they are not dropped.
+    if open_local and local_data:
+        for local_name, local_urls in local_data.items():
+            if local_name in matched_local_names:
+                continue
+            unmatch_local_urls = [
+                format_channel_data(local_url, "whitelist" if is_url_whitelisted(whitelist_maps, local_url,
+                                                                                 local_name) else "local")
+                for local_url in local_urls
+                if not check_url_by_keywords(local_url, blacklist)
+            ]
+            if unmatch_local_urls:
+                append_unmatch_data(local_name, unmatch_local_urls)
 
-        if hls_data and open_rtmp:
-            for hls_name, hls_urls in hls_data.items():
-                if hls_name in matched_hls_names:
-                    continue
-                unmatch_hls_urls = [format_channel_data(hls_url, "hls") for hls_url in hls_urls]
-                if unmatch_hls_urls:
-                    append_unmatch_data(hls_name, unmatch_hls_urls)
+    if hls_data and open_rtmp:
+        for hls_name, hls_urls in hls_data.items():
+            if hls_name in matched_hls_names:
+                continue
+            unmatch_hls_urls = [format_channel_data(hls_url, "hls") for hls_url in hls_urls]
+            if unmatch_hls_urls:
+                append_unmatch_data(hls_name, unmatch_hls_urls)
     return channels
 
 
@@ -403,7 +403,7 @@ def get_channel_items(whitelist_maps, blacklist, reporter=None) -> CategoryChann
             else:
                 print(t("msg.error_load_cache").format(info=e))
 
-        if unmatched_history and config.open_unmatch_category:
+        if unmatched_history:
             unmatch_category = t("content.unmatch_channel")
             for name, info_list in unmatched_history.items():
                 append_data_to_info_data(
@@ -741,7 +741,8 @@ def append_total_data(
                         print(f"{t(f"name.{method}")}:", len(name_results), end=", ")
             print_channel_number(data, cate, name, silent=bool(reporter))
 
-    if config.open_unmatch_category and subscribe_result:
+    # Template misses must still land in the unmatched category / final playlist.
+    if subscribe_result:
         unmatch_result = {
             name: info_list
             for name, info_list in subscribe_result.items()
@@ -780,16 +781,18 @@ def append_total_data(
             for channel_obj in data.values()
             for info_list in channel_obj.values()
         )
+        channel_count = sum(len(channel_obj) for channel_obj in data.values())
         reporter.info(
             "channels.aggregated",
             t("log.channels_aggregated").format(
-                channels=len(source_names),
+                channels=channel_count,
                 total=total_count,
                 ipv4=ipv4_count,
                 ipv6=ipv6_count,
             ),
             phase="aggregate",
-            channels=len(source_names),
+            channels=channel_count,
+            template_channels=len(source_names),
             total=total_count,
             ipv4=ipv4_count,
             ipv6=ipv6_count,
